@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 
 #Main class for logistic regression
 class LogReg:
-    def __init__(self, lr=0.01, tolerance=1e-6, maxItr=1000, threshold=0.5):
+  def __init__(self, lr=0.01, tolerance=1e-6, maxItr=1000, threshold=0.5):
     """
     Class constructor.
 
@@ -148,6 +148,8 @@ class LogReg:
         self.iterations_ = i
         break #Stops before if converges
       print(f"Iteration {i+1}: Loss = {loss}.")
+
+    self.iterations_ = self.maxItr
     print(f"Done training after {i+1} iterations.")
 
 
@@ -168,24 +170,22 @@ class LogReg:
 
   def convergence(self):
     """
-    Graphs the model´s convergence, pointing where.
+    Graphs the model´s convergence.
 
     It receives no parameters.
     It returns nothing.
     """
     #Error validation
-    if self.losses is None:
+    if self.losses_ is None:
       raise ValueError("Model not trained yet")
 
     plt.figure(figsize=(10, 6))
-    plt.plot(self.losses_)
+    plt.plot(self.losses_, label=f"Tolerance:  {self.tolerance}\nLearning rate: {self.lr}")
     plt.xlabel("Iterations")
     plt.ylabel("Loss")
     plt.title("Model training convergence")
 
-    plt.annotate(f"Tolerance:  {self.tolerance}\nLearning rate: {self.lr}",
-                 xy=(self.iterations_, self.losses_[-1]), xytext=(self.iterations_*0.6, self.losses_[-1]*1.1))
-
+    plt.legend()
     plt.show()
 
 
@@ -216,11 +216,12 @@ class LogReg:
       else:
         confussion["FN"] += 1
 
-    metrics["Accuracy"] = (confussion["TP"] + confussion["TN"]) / Ytarget.shape[0]
-    metrics["Precision"] = confussion["TP"] / (confussion["TP"] + confussion["FP"])
-    metrics["Recall"] = confussion["TP"] / (confussion["TP"] + confussion["FN"])
-    metrics["FPR"] = confussion["FP"] / (confussion["FP"] + confussion["TN"])
-    metrics["F1"] = 2 * (metrics["Precision"] * metrics["Recall"]) / (metrics["Precision"] + metrics["Recall"])
+    TP, TN, FP, FN = confussion["TP"], confussion["TN"], confussion["FP"], confussion["FN"]
+    metrics["Accuracy"] = (TP + TN) / (TP + TN + FP + FN)
+    metrics["Precision"] = (TP / (TP + FP)) if (TP + FP) != 0 else 0
+    metrics["Recall"] = (TP / (TP + FN)) if (TP + FN) != 0 else 0
+    metrics["FPR"] = (FP / (FP + TN)) if (FP + TN) != 0 else 0
+    metrics["F1"] = (2 * (metrics["Precision"] * metrics["Recall"]) / (metrics["Precision"] + metrics["Recall"])) if (metrics["Precision"] + metrics["Recall"]) != 0 else 0
 
     return confussion, metrics
 
@@ -251,18 +252,22 @@ class LogReg:
     -confussion: Confussion matrix dictionary.
     It returns nothing.
     """
-    tags = ["Positive", "Negative"]
-    data = np.array([[confussion["TP"], confussion["FP"]], [confussion["FN"], confussion["TN"]]])
+    pTags = ["Positive", "Negative"]
+    rTags = ["Negative", "Positive"]
+    data = np.array([[confussion["FP"], confussion["TN"]],
+                    [confussion["TP"], confussion["FN"]]])
+
 
     fig, ax = plt.subplots()
-    im = ax.imshow(data, cmap="Blues")
+    im = ax.imshow(data)
 
-    ax.set_xticks(np.arange(len(tags)), labels=tags)
-    ax.set_yticks(np.arange(len(tags)), labels=tags)
+    ax.set_xticks(range(len(pTags)), labels=pTags)
+    ax.set_yticks(range(len(rTags)), labels=rTags)
 
-    for i in range(len(tags)):
-      for j in range(len(tags)):
-        text = ax.text(j, i, data[i, j], ha="center", va="center", color="w")
+    for i in range(len(rTags)):
+      for j in range(len(pTags)):
+        text = ax.text(j, i, data[i, j],
+                       ha="center", va="center", color="w")
 
     ax.set_xlabel("Predicted")
     ax.set_ylabel("Real")
@@ -313,7 +318,10 @@ class LogReg:
       tprs.append(metrics["Recall"])
       fprs.append(metrics["FPR"])
 
-    auc = np.trapz(tprs, fprs)
+    # Creates a sorted copy so that integrations resolves correctly
+    sortIdx = np.argsort(fprs)
+    auc = np.trapz(np.array(tprs)[sortIdx], np.array(fprs)[sortIdx])
+
 
     self.threshold = temp
 
@@ -341,9 +349,10 @@ class LogReg:
     file = open(filename, "w")
 
     for coef in self.coef_:
-      file.write(str(coef)+",")
+      file.write(f"{coef[0]},")
     file.write(str(self.intercept_))
 
+    print(f"Model saved as {filename}")
     file.close()
 
   def loadModel(self, filename):
@@ -361,7 +370,9 @@ class LogReg:
     file = open(filename, "r")
 
     coefs = file.readline().split(",")
-    self.coef_ = np.array(float(coefs[:-1]).reshape(-1, 1))
-    self.intercept_ = float(coefs[-1])
+    temp = np.array(coefs[:-1]).astype(float).reshape(-1, 1)
+    self.coef_ = temp
+    self.intercept_ = temp[-1]
 
+    print(f"Model loaded from {filename}")
     file.close()
