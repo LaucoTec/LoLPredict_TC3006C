@@ -1,3 +1,8 @@
+"""
+Logistic Regression implementation from scratch in Python.
+Author: Luis Adrián Uribe Cruz
+"""
+
 # Imports
 import warnings
 import pandas as pd
@@ -81,7 +86,7 @@ class LogReg:
         ytemp = data[targetCol].values.reshape(-1, 1)
 
         # Separation of Training, Validation and Test sets
-        XTrain, XVal, XTest = Xtemp[:idxTrain], Xtemp[idxTrain:idxVal]
+        XTrain, XVal = Xtemp[:idxTrain], Xtemp[idxTrain:idxVal]
         XTest = Xtemp[idxVal:]
         yTrain, yVal = ytemp[:idxTrain], ytemp[idxTrain:idxVal]
         yTest = ytemp[idxVal:]
@@ -184,7 +189,8 @@ class LogReg:
             raise ValueError("Model not initialized yet")
 
         return -np.mean(
-            target * np.log(predictions) + (1 - target) * np.log(1 - predictions)
+            target * np.log(predictions) + (1 - target)
+            * np.log(1 - predictions)
         )
 
     def predict(self, features):
@@ -213,6 +219,14 @@ class LogReg:
         if self.XTrain is None:
             raise ValueError("Data not loaded yet")
 
+        # Early stopping variables
+        patience = 10
+        bestLoss = float("inf")
+        patienceCounter = 0
+        bestCoeffs = None
+        bestIntercept = None
+        bestIteration = 0
+
         for i in range(self.maxItr):
             # Model prediction
             yPred = self.predict(self.XTrain)
@@ -222,14 +236,34 @@ class LogReg:
             self.losses_.append(lossTrain)
 
             # Gradient calculation
-            coefGrad = self.XTrain.T.dot(yPred - self.yTrain) / self.XTrain.shape[0]
+            coefGrad = self.XTrain.T.dot(yPred - self.yTrain)
+            coefGrad /= self.XTrain.shape[0]
             interGrad = np.mean(yPred - self.yTrain)
 
             # Update parameters
             self.coef_ -= self.lr * coefGrad
             self.intercept_ -= self.lr * interGrad
 
-            if (i > 0) and (abs(self.losses_[i - 1] - lossTrain) < self.tolerance):
+            # Early stopping check
+            if lossTrain < bestLoss - self.tolerance:
+                bestLoss = lossTrain
+                bestCoeffs = self.coef_.copy()
+                bestIntercept = self.intercept_
+                bestIteration = i
+                patienceCounter = 0
+            else:
+                patienceCounter += 1
+                if patienceCounter >= patience:
+                    self.coef_ = bestCoeffs
+                    self.intercept_ = bestIntercept
+                    self.iterations_ = bestIteration + 1
+                    print(f"Early stopping at iteration {i+1}.")
+                    print("Restoring best model...")
+                    print(f"Iteration {self.iterations_} | Loss {bestLoss}.")
+                    break
+
+            if ((i > 0) and (abs(self.losses_[i - 1] - lossTrain)
+                             < self.tolerance)):
                 self.iterations_ = i
                 print(f"Done training after {i+1} iterations.")
                 break  # Stops if converges
@@ -297,7 +331,8 @@ class LogReg:
             raise ValueError("Model not trained yet")
 
         confusion = {"TP": 0, "TN": 0, "FP": 0, "FN": 0}
-        metrics = {"Accuracy": 0, "Precision": 0, "Recall": 0, "FPR": 0, "F1": 0}
+        metrics = {"Accuracy": 0, "Precision": 0, "Recall": 0,
+                   "FPR": 0, "F1": 0}
 
         for row, value in zip(Xfeatures, Ytarget):
             pred = self.predictClass(row)
@@ -314,13 +349,16 @@ class LogReg:
         FP, FN = confusion["FP"], confusion["FN"]
         metrics["Accuracy"] = (TP + TN) / (TP + TN + FP + FN)
         metrics["Precision"] = np.divide(
-            TP, (TP + FP), out=np.zeros_like(TP, dtype=float), where=(TP + FP) != 0
+            TP, (TP + FP), out=np.zeros_like(TP, dtype=float),
+            where=(TP + FP) != 0
         )
         metrics["Recall"] = np.divide(
-            TP, (TP + FN), out=np.zeros_like(TP, dtype=float), where=(TP + FN) != 0
+            TP, (TP + FN), out=np.zeros_like(TP, dtype=float),
+            where=(TP + FN) != 0
         )
         metrics["FPR"] = np.divide(
-            FP, (FP + TN), out=np.zeros_like(TP, dtype=float), where=(FP + TN) != 0
+            FP, (FP + TN), out=np.zeros_like(TP, dtype=float),
+            where=(FP + TN) != 0
         )
         metrics["F1"] = np.divide(
             2 * TP,
@@ -349,7 +387,8 @@ class LogReg:
             self.XTrain, self.yTrain
         )
 
-        self.testConfusion_, self.testMetrics_ = self.accuracy(self.XTest, self.yTest)
+        self.testConfusion_, self.testMetrics_ = self.accuracy(self.XTest,
+                                                               self.yTest)
 
     def confusionPlot(self, confusion):
         """
@@ -362,7 +401,8 @@ class LogReg:
         pTags = ["Positive", "Negative"]
         rTags = ["Negative", "Positive"]
         data = np.array(
-            [[confusion["FP"], confusion["TN"]], [confusion["TP"], confusion["FN"]]]
+            [[confusion["FP"], confusion["TN"]],
+             [confusion["TP"], confusion["FN"]]]
         )
         fig, ax = plt.subplots()
         im = ax.imshow(data)
@@ -373,7 +413,8 @@ class LogReg:
         # Show figure
         for i in range(len(rTags)):
             for j in range(len(pTags)):
-                text = ax.text(j, i, data[i, j], ha="center", va="center", color="w")
+                text = ax.text(j, i, data[i, j],
+                               ha="center", va="center", color="w")
 
         ax.set_xlabel("Predicted")
         ax.set_ylabel("Real")
@@ -397,7 +438,7 @@ class LogReg:
 
         # Show figure
         plt.bar(
-            ["Accuracy", "Precision", "Recall", "F1"],
+            ["Accuracy", "Precision", "Recall", "FPR", "F1"],
             [
                 metrics["Accuracy"],
                 metrics["Precision"],
@@ -500,9 +541,8 @@ class LogReg:
         file = open(filename, "r")
 
         coefs = file.readline().split(",")
-        temp = np.array(coefs[:-1]).astype(float).reshape(-1, 1)
-        self.coef_ = temp
-        self.intercept_ = temp[-1]
+        self.coef_ = np.array(coefs[:-1]).astype(float).reshape(-1, 1)
+        self.intercept_ = float(coefs[-1])
 
         losses = file.readline().split(",")
         self.losses_ = np.array(losses[:-1]).astype(float).tolist()
