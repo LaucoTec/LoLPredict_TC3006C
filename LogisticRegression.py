@@ -28,9 +28,15 @@ class LogReg:
 
     #Model performance
     self.losses_ = []
-    self.trainConfussion_ = None
+    self.valLosses_ = []
+
+    self.trainConfusion_ = None
     self.trainMetrics_ = None
-    self.testConfussion_ = None
+
+    self.valConfusion_ = None
+    self.valMetrics_ = None
+
+    self.testConfusion_ = None
     self.testMetrics_ = None
 
 
@@ -44,25 +50,7 @@ class LogReg:
     return 1 / (1 + np.exp(-z))
 
 
-  def _zScores(self, temp, mean=None, std=None):
-    """
-    Function that calculates the z-score of a given array.
-
-    Parameters:
-    - temp = Array to be standardized.
-    - mean = Array of means per column. If None, calculates it.
-    - std = Array of standard deviations per column. If None, calculates it.
-    It returns the standardized array, the mean array and the standard deviation array.
-    """
-    if mean is None:
-      mean = np.mean(temp, axis=0)
-    if std is None:
-      std = np.std(temp, axis=0) + 1e-10
-
-    return (temp - mean) / std, mean, std
-
-
-  def dataLoader(self, data, targetCol, trainSize=0.8):
+  def dataLoader(self, data, targetCol, trainSize=0.6, valSize=0.2):
     """
     Prepares a pandas DataFrame into normalized, separated data for training and testing
     Parameters:
@@ -72,23 +60,24 @@ class LogReg:
     It returns nothing.
     """
     #Error validation
-    if not 0 < trainSize < 1:
-      raise ValueError("trainSize must be between 0 and 1")
+    if not 0 < trainSize + valSize < 1:
+      raise ValueError("trainSize and valSize must be between 0 and 1")
+    if targetCol not in data.columns:
+      raise ValueError("targetCol not in DataFrame columns")
 
-    #Separation index for training and testing
-    idx = int(len(data) * trainSize)
+    #Separation indexes
+    if trainSize + valSize == 1:
+      trainSize -= 0.05 #Avoids having no test set
+    idxTrain = int(len(data) * trainSize)
+    idxVal = int(len(data) * (trainSize + valSize))
 
     #Separation into X features and Y target
     Xtemp = data.drop(columns=[targetCol]).values
     ytemp = data[targetCol].values.reshape(-1, 1)
 
-    #Separation of Training and Testing
-    XTrain, XTest = Xtemp[:idx], Xtemp[idx:]
-    yTrain, yTest = ytemp[:idx], ytemp[idx:]
-
-    #Standarization trough Z-Scores
-    XTrain, self.mean, self.std = self._zScores(XTrain)
-    XTest,_,_ = self._zScores(XTest, self.mean, self.std)
+    #Separation of Training, Validation and Test sets
+    XTrain, XVal, XTest = Xtemp[:idxTrain], Xtemp[idxTrain:idxVal], Xtemp[idxVal:]
+    yTrain, yVal, yTest = ytemp[:idxTrain], ytemp[idxTrain:idxVal], ytemp[idxVal:]
 
     #Initialize coefficients
     features = XTrain.shape[1]
@@ -98,13 +87,35 @@ class LogReg:
     #Save arrays
     self.XTrain = XTrain
     self.yTrain = yTrain
+
+    self.XVal = XVal
+    self.yVal = yVal
+
     self.XTest = XTest
     self.yTest = yTest
 
 
+  def loss(self, features, target):
+    """
+    Calculates the logistic loss with given features and target.
+
+    Parameters:
+    - features = Array of features.
+    - target = Array of target values.
+    It returns the loss value.
+    """
+    #Error validation
+    if self.coef_ is None:
+      raise ValueError("Model not initialized yet")
+
+    yPred = self.predict(features)
+    return - np.mean(target * np.log(yPred) + (1 - target) * np.log(1 - yPred))
+    # - np.mean(self.yTrain * np.log(yPred) + (1 - self.yTrain) * np.log(1 - yPred))
+
+
   def predict(self, features):
     """
-    Calculates the model prediction with a given array of features.
+    Calculates the model logit with a given array of features.
 
     Parameters:
     - features = Array of features.
@@ -112,7 +123,7 @@ class LogReg:
     """
     #Error validation
     if self.coef_ is None:
-      raise ValueError("Model not trained yet")
+      raise ValueError("Model not initialized yet")
 
     return self._sigmoid(features.dot(self.coef_) + self.intercept_)
 
@@ -196,40 +207,40 @@ class LogReg:
     Parameters:
     -Xfeatures = array of independent values
     -Ytarget = array of dependent values
-    It returns two dictionaries with confussion values and metrics.
+    It returns two dictionaries with confusion values and metrics.
     """
     #Error validation
     if self.coef_ is None:
       raise ValueError("Model not trained yet")
 
-    confussion = {"TP":0, "TN":0, "FP":0, "FN":0}
+    confusion = {"TP":0, "TN":0, "FP":0, "FN":0}
     metrics = {"Accuracy":0, "Precision":0, "Recall":0, "FPR": 0, "F1":0}
 
     for row, value in zip(Xfeatures, Ytarget):
       pred = self.predictClass(row)
       if pred == value == 1:
-        confussion["TP"] += 1
+        confusion["TP"] += 1
       elif pred == value == 0:
-        confussion["TN"] += 1
+        confusion["TN"] += 1
       elif pred == 1:
-        confussion["FP"] += 1
+        confusion["FP"] += 1
       else:
-        confussion["FN"] += 1
+        confusion["FN"] += 1
 
-    TP, TN, FP, FN = confussion["TP"], confussion["TN"], confussion["FP"], confussion["FN"]
+    TP, TN, FP, FN = confusion["TP"], confusion["TN"], confusion["FP"], confusion["FN"]
     metrics["Accuracy"] = (TP + TN) / (TP + TN + FP + FN)
     metrics["Precision"] = (TP / (TP + FP)) if (TP + FP) != 0 else 0
     metrics["Recall"] = (TP / (TP + FN)) if (TP + FN) != 0 else 0
     metrics["FPR"] = (FP / (FP + TN)) if (FP + TN) != 0 else 0
     metrics["F1"] = (2 * (metrics["Precision"] * metrics["Recall"]) / (metrics["Precision"] + metrics["Recall"])) if (metrics["Precision"] + metrics["Recall"]) != 0 else 0
 
-    return confussion, metrics
+    return confusion, metrics
 
 
   def evaluate(self):
     """
     Evaluates the model´s performance in both train and test sets.
-    Receives the True Positives, True Negatives, False Positives and False Negatives for confussion.
+    Receives the True Positives, True Negatives, False Positives and False Negatives for confusion.
     Receives the Accuracy, Precision, Recall and F1 for metrics.
 
     It receives no parameters.
@@ -239,23 +250,23 @@ class LogReg:
     if self.coef_ is None:
       raise ValueError("Model not trained yet")
 
-    self.trainConfussion_, self.trainMetrics_ = self.accuracy(self.XTrain, self.yTrain)
+    self.trainConfusion_, self.trainMetrics_ = self.accuracy(self.XTrain, self.yTrain)
 
-    self.testConfussion_, self.testMetrics_ = self.accuracy(self.XTest, self.yTest)
+    self.testConfusion_, self.testMetrics_ = self.accuracy(self.XTest, self.yTest)
 
 
-  def confusionPlot(self, confussion):
+  def confusionPlot(self, confusion):
     """
     Creates an annotated heatmap of the confusion matrix.
 
     Parameters:
-    -confussion: Confussion matrix dictionary.
+    -confusion: Confusion matrix dictionary.
     It returns nothing.
     """
     pTags = ["Positive", "Negative"]
     rTags = ["Negative", "Positive"]
-    data = np.array([[confussion["FP"], confussion["TN"]],
-                    [confussion["TP"], confussion["FN"]]])
+    data = np.array([[confusion["FP"], confusion["TN"]],
+                    [confusion["TP"], confusion["FN"]]])
 
 
     fig, ax = plt.subplots()
