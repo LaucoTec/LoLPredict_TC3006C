@@ -35,6 +35,14 @@ class LogReg:
         self.coef_ = None
         self.intercept_ = 0.0
 
+        # Data normalization
+        self.norm_ = None
+        self.method = ""
+        self.std = None
+        self.mean = None
+        self.max = None
+        self.min = None
+
         # Model performance
         self.losses_ = []
         self.valLosses_ = []
@@ -97,13 +105,13 @@ class LogReg:
         self.coef_ = np.random.randn(features, 1)
 
         # Save arrays
-        self.XTrain = XTrain
+        self.XTrain = XTrain.astype(float)
         self.yTrain = yTrain
 
-        self.XVal = XVal
+        self.XVal = XVal.astype(float)
         self.yVal = yVal
 
-        self.XTest = XTest
+        self.XTest = XTest.astype(float)
         self.yTest = yTest
 
         # Normalization parameters
@@ -111,7 +119,7 @@ class LogReg:
         self.std = XTrain.std(axis=0)
         self.min = XTrain.min(axis=0)
         self.max = XTrain.max(axis=0)
-        self.norm = False
+        self.norm_ = False
 
     def normalize(self, method="z-score", force=False):
         """
@@ -126,7 +134,7 @@ class LogReg:
             raise ValueError("Data not loaded yet")
         if method not in ["z-score", "min-max"]:
             raise ValueError("Unrecognized normalization method")
-        if self.norm and not force:
+        if self.norm_ and not force:
             warnings.warn(
                 "Data already normalized, use force=True to overwrite",
                 UserWarning
@@ -172,7 +180,8 @@ class LogReg:
                 where=(self.max - self.min) != 0,
             )
 
-        self.norm = True
+        self.norm_ = True
+        self.method += method + " "
 
     def loss(self, features, target, predictions):
         """
@@ -245,33 +254,33 @@ class LogReg:
             self.intercept_ -= self.lr * interGrad
 
             # Early stopping check
-            if lossTrain < bestLoss - self.tolerance:
-                bestLoss = lossTrain
+            self.valLosses_.append(
+                self.loss(self.XVal, self.yVal, self.predict(self.XVal))
+            )
+            if self.valLosses_[-1] < bestLoss - self.tolerance:
+                bestLoss = self.valLosses_[-1]
                 bestCoeffs = self.coef_.copy()
                 bestIntercept = self.intercept_
-                bestIteration = i
+                bestIteration = i + 1
                 patienceCounter = 0
             else:
                 patienceCounter += 1
                 if patienceCounter >= patience:
                     self.coef_ = bestCoeffs
                     self.intercept_ = bestIntercept
-                    self.iterations_ = bestIteration + 1
+                    self.iterations_ = bestIteration
                     print(f"Early stopping at iteration {i+1}.")
                     print("Restoring best model...")
                     print(f"Iteration {self.iterations_} | Loss {bestLoss}.")
                     break
 
+            # Convergence check
             if ((i > 0) and (abs(self.losses_[i - 1] - lossTrain)
                              < self.tolerance)):
-                self.iterations_ = i
+                self.iterations_ = i + 1
                 print(f"Done training after {i+1} iterations.")
-                break  # Stops if converges
+                break
             print(f"Iteration {i+1}: Loss = {lossTrain}.")
-
-            # Validation loss calculation
-            lossVal = self.loss(self.XVal, self.yVal, self.predict(self.XVal))
-            self.valLosses_.append(lossVal)
 
         else:
             self.iterations_ = self.maxItr
@@ -290,32 +299,6 @@ class LogReg:
             raise ValueError("Model not trained yet")
 
         return (self.predict(features) >= self.threshold).astype(int)
-
-    def convergence(self):
-        """
-        Graphs the model´s convergence.
-
-        It receives no parameters.
-        It returns nothing, but creates a plot figure file.
-        """
-        # Error validation
-        if self.losses_ is None:
-            raise ValueError("Model not trained yet")
-
-        # Show figure
-        plt.figure(figsize=(10, 6))
-        plt.plot(
-            self.losses_,
-            label=f"Tolerance:  {self.tolerance}\nLearning rate: {self.lr}",
-        )
-        plt.xlabel("Iterations")
-        plt.ylabel("Loss")
-        plt.title("Model training convergence")
-        plt.legend()
-        plt.show()
-
-        # Save figure
-        plt.savefig("Convergence.png")
 
     def accuracy(self, Xfeatures, Ytarget):
         """
@@ -387,10 +370,60 @@ class LogReg:
             self.XTrain, self.yTrain
         )
 
-        self.testConfusion_, self.testMetrics_ = self.accuracy(self.XTest,
-                                                               self.yTest)
+        self.valConfusion_, self.valMetrics_ = self.accuracy(
+            self.XVal, self.yVal
+        )
 
-    def confusionPlot(self, confusion):
+        self.testConfusion_, self.testMetrics_ = self.accuracy(
+            self.XTest, self.yTest
+        )
+
+    def convergence(self):
+        """
+        Graphs the model´s convergence.
+
+        It receives no parameters.
+        It returns nothing, but creates a plot figure file.
+        """
+        # Error validation
+        if self.losses_ is None or self.valLosses_ is None:
+            raise ValueError("Model not trained yet")
+
+        plt.figure()
+
+        # Plot training loss
+        plt.plot(
+            self.losses_,
+            label=f"Training Loss (L: {self.losses_[-1]:.4f})",
+        )
+        # Plot validation loss
+        plt.plot(
+            self.valLosses_,
+            label=f"Validation Loss (L: {self.valLosses_[-1]:.4f})",
+            linestyle="--",
+        )
+        # Plot convergence point
+        plt.scatter(
+            self.iterations_-1,
+            self.losses_[-1],
+            color="red",
+            marker="o",
+            label=f"Convergence (Itr: {self.iterations_})",
+            )
+
+        plt.xlabel("Iterations")
+        plt.ylabel("Loss")
+        plt.title(f"Model convergence | LR: {self.lr} | Tol: {self.tolerance}")
+        plt.legend()
+        plt.grid(True)
+
+        # Save figure
+        plt.savefig("Convergence.png")
+
+        # Show figure
+        plt.show()
+
+    def confusionPlot(self, confusion, filename="Confusion_Matrix.png"):
         """
         Creates an annotated heatmap of the confusion matrix.
 
@@ -398,6 +431,15 @@ class LogReg:
         -confusion: Confusion matrix dictionary.
         It returns nothing, but creates a plot figure file.
         """
+        # Error validations
+        if confusion is None:
+            raise ValueError("Confusion matrix not calculated yet")
+        if ".png" not in filename:
+            filename += ".png"
+
+        # Heatmap order
+        # | FP | TN |
+        # | TP | FN |
         pTags = ["Positive", "Negative"]
         rTags = ["Negative", "Positive"]
         data = np.array(
@@ -405,12 +447,12 @@ class LogReg:
              [confusion["TP"], confusion["FN"]]]
         )
         fig, ax = plt.subplots()
-        im = ax.imshow(data)
+        im = ax.imshow(data, cmap="copper")
 
         ax.set_xticks(range(len(pTags)), labels=pTags)
         ax.set_yticks(range(len(rTags)), labels=rTags)
 
-        # Show figure
+        # Annotate heatmap
         for i in range(len(rTags)):
             for j in range(len(pTags)):
                 text = ax.text(j, i, data[i, j],
@@ -419,12 +461,14 @@ class LogReg:
         ax.set_xlabel("Predicted")
         ax.set_ylabel("Real")
         ax.set_title("Confusion Matrix")
-        plt.show()
 
         # Save figure
-        plt.savefig("Confusion_Matrix.png")
+        plt.savefig(filename)
 
-    def metricPlot(self, metrics):
+        # Show figure
+        plt.show()
+
+    def metricPlot(self, metrics, filename="Metrics.png"):
         """
         Plots the precision, recall and F1 score.
 
@@ -435,25 +479,29 @@ class LogReg:
         # Error validations
         if metrics is None:
             raise ValueError("Metrics not calculated yet")
+        if ".png" not in filename:
+            filename += ".png"
 
-        # Show figure
+        # Plot metrics
         plt.bar(
-            ["Accuracy", "Precision", "Recall", "FPR", "F1"],
+            ["Accuracy", "Precision", "Recall", "F1"],
             [
                 metrics["Accuracy"],
                 metrics["Precision"],
                 metrics["Recall"],
-                metrics["FPR"],
                 metrics["F1"],
-            ],
+            ]
         )
+        plt.bar_label(plt.gca().containers[0], fmt="%.2f")
         plt.title("Model performance metrics")
         plt.ylabel("Score")
         plt.ylim(0, 1)
-        plt.show()
 
         # Save figure
         plt.savefig("Metrics.png")
+
+        # Show figure
+        plt.show()
 
     def rocCurve(self):
         """
@@ -483,25 +531,27 @@ class LogReg:
         sortIdx = np.argsort(fprs)
         auc = np.trapz(np.array(tprs)[sortIdx], np.array(fprs)[sortIdx])
 
+        # Restore original threshold
         self.threshold = temp
 
-        # Show figure
-        plt.figure()
+        # Plot ROC curve and AUC
         plt.plot(fprs, tprs, label=f"AUC: {auc:.3f}")
         plt.plot([0, 1], [0, 1], "k--", label="Randomness")
         plt.xlabel("False Positive Rate")
         plt.ylabel("True Positive Rate")
         plt.title("ROC Curve")
         plt.legend()
-        plt.show()
 
         # Save figure
         plt.savefig("ROC_Curve.png")
 
+        # Show figure
+        plt.show()
+
     def saveModel(self, filename):
         """
-        Exports the model´s coefficients, intercept
-        and loss history into a CSV file.
+        Exports the model´s hyperparameters, coefficients, intercept
+        and loss histories into a CSV file.
 
         Parameters:
         -filename: Name of the file to save the model.
@@ -510,24 +560,39 @@ class LogReg:
         # Error validation
         if ".csv" not in filename:
             filename += ".csv"
-
         file = open(filename, "w")
+        if file is None:
+            raise ValueError("file not found")
 
-        for coef in self.coef_:
-            file.write(f"{coef[0]},")
-        file.write(str(self.intercept_))
-        file.write("\n")
+        # Save hyperparameters
+        file.write(
+            f"{self.lr},{self.tolerance},{self.maxItr},{self.threshold}\n"
+            )
 
-        for loss in self.losses_:
-            file.write(f"{loss},")
-        file.write("\n")
+        # Save coefficients and intercept
+        file.write(",".join(map(str, self.coef_.tolist())) + ","
+                   + str(self.intercept_) + "\n")
+
+        # Save losses
+        file.write(",".join(map(str, self.losses_)) + "\n")
+        file.write(",".join(map(str, self.valLosses_)) + "\n")
+
+        # Save other parameters
+        file.write(f"{self.iterations_},{self.norm_},{self.method}\n")
+
+        # Save normalization params if applicable
+        if self.norm_:
+            file.write(",".join(map(str, self.std.tolist())) + "\n")
+            file.write(",".join(map(str, self.mean.tolist())) + "\n")
+            file.write(",".join(map(str, self.min.tolist())) + "\n")
+            file.write(",".join(map(str, self.max.tolist())) + "\n")
 
         print(f"Model saved as {filename}")
         file.close()
 
     def loadModel(self, filename):
         """
-        Imports the model´s coefficients, intercept
+        Imports the model´s hyperparameters, coefficients, intercept
          and loss history from a CSV file.
 
         Parameters:
@@ -537,15 +602,47 @@ class LogReg:
         # Error validation
         if ".csv" not in filename:
             filename += ".csv"
-
         file = open(filename, "r")
+        if file is None:
+            raise ValueError("File not found")
 
+        # Load hyperparameters
+        params = file.readline().split(",")
+        self.lr = float(params[0])
+        self.tolerance = float(params[1])
+        self.maxItr = int(params[2])
+        self.threshold = float(params[3])
+
+        # Load coefficients and intercept
         coefs = file.readline().split(",")
         self.coef_ = np.array(coefs[:-1]).astype(float).reshape(-1, 1)
         self.intercept_ = float(coefs[-1])
 
-        losses = file.readline().split(",")
-        self.losses_ = np.array(losses[:-1]).astype(float).tolist()
+        # Load losses
+        self.losses_ = np.array(file.readline().split(",")).astype(float).tolist()
+        self.valLosses_ = np.array(file.readline().split(",")).astype(float).tolist()
+
+        # Load other parameters
+        params = file.readline().split(",")
+        self.iterations_ = int(params[0])
+        self.norm_ = params[1] == "True"
+        self.method = params[2]
+        if self.norm_:  # Load normalization params
+            self.std = np.array(
+                file.readline().split(",")
+            ).astype(float)
+            self.mean = np.array(
+                file.readline().split(",")
+            ).astype(float)
+            self.min = np.array(
+                file.readline().split(",")
+            ).astype(float)
+            self.max = np.array(
+                file.readline().split(",")
+            ).astype(float)
+
+            for method in self.method.split(" "):  # Normalize keeping order
+                self.normalize(method, force=True)
 
         print(f"Model loaded from {filename}")
         file.close()
