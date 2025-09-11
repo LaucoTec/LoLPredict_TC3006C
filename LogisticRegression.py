@@ -8,6 +8,7 @@ import warnings
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.stats import norm
 
 
 # Main class for logistic regression
@@ -37,7 +38,7 @@ class LogReg:
 
         # Data normalization
         self.norm_ = None
-        self.method = ""
+        self.method = []
         self.std = None
         self.mean = None
         self.max = None
@@ -55,6 +56,7 @@ class LogReg:
 
         self.testConfusion_ = None
         self.testMetrics_ = None
+
 
     def _sigmoid(self, z):
         """
@@ -92,6 +94,10 @@ class LogReg:
         # Separation into X features and Y target
         Xtemp = data.drop(columns=[targetCol]).values
         ytemp = data[targetCol].values.reshape(-1, 1)
+
+        # Save feature names
+        self.features_ = data.drop(columns=[targetCol]).columns
+        self.features_ = self.features_.insert(0, "Intercept")
 
         # Separation of Training, Validation and Test sets
         XTrain, XVal = Xtemp[:idxTrain], Xtemp[idxTrain:idxVal]
@@ -181,7 +187,7 @@ class LogReg:
             )
 
         self.norm_ = True
-        self.method += method + " "
+        self.method.append(method)
 
     def loss(self, features, target, predictions):
         """
@@ -257,7 +263,7 @@ class LogReg:
             self.valLosses_.append(
                 self.loss(self.XVal, self.yVal, self.predict(self.XVal))
             )
-            if self.valLosses_[-1] < bestLoss - self.tolerance:
+            if self.valLosses_[-1] < bestLoss:
                 bestLoss = self.valLosses_[-1]
                 bestCoeffs = self.coef_.copy()
                 bestIntercept = self.intercept_
@@ -378,7 +384,56 @@ class LogReg:
             self.XTest, self.yTest
         )
 
-    def convergence(self):
+    def significantFeatures(self):
+        """
+        Calculates the standard errors of the coefficients to
+        determine their significance.
+        It receives no parameters.
+        It returns a significance dataframe.
+        """
+        # Error validation
+        if self.coef_ is None:
+            raise ValueError("Model not trained yet")
+        if self.XTrain is None:
+            raise ValueError("Data not loaded yet")
+
+        # Copy arrays to add intercept
+        trainCopy = np.hstack(
+            [np.ones((self.XTrain.shape[0], 1)), self.XTrain]
+        )
+        coefCopy = np.vstack([np.array([[self.intercept_]]), self.coef_])
+
+        # Calculate standard errors
+        pred = self.predict(self.XTrain).flatten()
+        V = np.diag((pred * (1 - pred)))
+        covMatrix = np.linalg.pinv(
+            trainCopy.T @ V @ trainCopy
+            )  # Pseudo-inverse to avoid singularities
+
+        # Standard errors
+        stdErrors = np.sqrt(np.diag(covMatrix)).reshape(-1, 1)
+
+        # Z-scores and p-values
+        zScores = coefCopy / stdErrors
+        pValues = 2 * (1 - norm.cdf(np.abs(zScores)))
+
+        # Confidence intervals
+        ciLower = coefCopy - 1.96 * stdErrors
+        ciUpper = coefCopy + 1.96 * stdErrors
+
+        # Create significance dataframe
+        significance = pd.DataFrame({
+            "Coefficient": coefCopy.flatten(),
+            "StdError": stdErrors.flatten(),
+            "ZScore": zScores.flatten(),
+            "PValue": pValues.flatten(),
+            "CI_Lower": ciLower.flatten(),
+            "CI_Upper": ciUpper.flatten()
+        }, index=self.features_)
+
+        return significance
+
+    def convergencePlot(self, filename="Convergence.png"):
         """
         Graphs the model´s convergence.
 
@@ -388,6 +443,8 @@ class LogReg:
         # Error validation
         if self.losses_ is None or self.valLosses_ is None:
             raise ValueError("Model not trained yet")
+        if ".png" not in filename:
+            filename += ".png"
 
         plt.figure()
 
@@ -418,7 +475,7 @@ class LogReg:
         plt.grid(True)
 
         # Save figure
-        plt.savefig("Convergence.png")
+        plt.savefig(filename)
 
         # Show figure
         plt.show()
@@ -503,7 +560,7 @@ class LogReg:
         # Show figure
         plt.show()
 
-    def rocCurve(self):
+    def rocCurvePlot(self, filename="ROC_Curve.png"):
         """
         Graphs the ROC curves and calculates its respective
         AUC within the Test set.
@@ -514,6 +571,8 @@ class LogReg:
         # Error validations
         if self.coef_ is None:
             raise ValueError("Model not trained yet")
+        if ".png" not in filename:
+            filename += ".png"
 
         temp = self.threshold
         thresholds = np.linspace(0, 1, 50)
@@ -543,7 +602,7 @@ class LogReg:
         plt.legend()
 
         # Save figure
-        plt.savefig("ROC_Curve.png")
+        plt.savefig(filename)
 
         # Show figure
         plt.show()
@@ -570,7 +629,7 @@ class LogReg:
             )
 
         # Save coefficients and intercept
-        file.write(",".join(map(str, self.coef_.tolist())) + ","
+        file.write(",".join(map(str, self.coef_.flatten().tolist())) + ","
                    + str(self.intercept_) + "\n")
 
         # Save losses
@@ -578,7 +637,8 @@ class LogReg:
         file.write(",".join(map(str, self.valLosses_)) + "\n")
 
         # Save other parameters
-        file.write(f"{self.iterations_},{self.norm_},{self.method}\n")
+        file.write(f"{self.iterations_},{self.norm_},")
+        file.write("".join([m + "," for m in self.method]) + "\n")
 
         # Save normalization params if applicable
         if self.norm_:
@@ -619,14 +679,18 @@ class LogReg:
         self.intercept_ = float(coefs[-1])
 
         # Load losses
-        self.losses_ = np.array(file.readline().split(",")).astype(float).tolist()
-        self.valLosses_ = np.array(file.readline().split(",")).astype(float).tolist()
+        self.losses_ = np.array(
+            file.readline().split(",")
+            ).astype(float).tolist()
+        self.valLosses_ = np.array(
+            file.readline().split(",")
+            ).astype(float).tolist()
 
         # Load other parameters
         params = file.readline().split(",")
         self.iterations_ = int(params[0])
         self.norm_ = params[1] == "True"
-        self.method = params[2]
+
         if self.norm_:  # Load normalization params
             self.std = np.array(
                 file.readline().split(",")
@@ -641,7 +705,7 @@ class LogReg:
                 file.readline().split(",")
             ).astype(float)
 
-            for method in self.method.split(" "):  # Normalize keeping order
+            for method in params[2:-1]:  # Normalize keeping order
                 self.normalize(method, force=True)
 
         print(f"Model loaded from {filename}")
