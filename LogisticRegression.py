@@ -7,13 +7,12 @@ Author: Luis Adrián Uribe Cruz
 import warnings
 import pandas as pd
 import numpy as np
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 from scipy.stats import norm
 
 
 # Main class for logistic regression
-
-
 class LogReg:
     def __init__(self, lr=0.01, tolerance=1e-6, maxItr=1000, threshold=0.5):
         """
@@ -38,11 +37,11 @@ class LogReg:
 
         # Data normalization
         self.norm_ = None
-        self.method = []
-        self.std = None
-        self.mean = None
-        self.max = None
-        self.min = None
+        self.method_ = []
+        self.std_ = None
+        self.mean_ = None
+        self.max_ = None
+        self.min_ = None
 
         # Model performance
         self.losses_ = []
@@ -57,7 +56,6 @@ class LogReg:
         self.testConfusion_ = None
         self.testMetrics_ = None
 
-
     def _sigmoid(self, z):
         """
         Function calculation the sigmoid of an expression.
@@ -67,7 +65,7 @@ class LogReg:
         """
         return 1 / (1 + np.exp(-z))
 
-    def dataLoader(self, data, targetCol, trainSize=0.6, valSize=0.2):
+    def dataLoader(self, data, targetCol, trainSize=0.6, valSize=0.2, randomstate=None):
         """
         Prepares a pandas DataFrame into normalized,
         separated data for training and testing
@@ -107,7 +105,8 @@ class LogReg:
 
         # Initialize coefficients
         features = XTrain.shape[1]
-        np.random.seed(42)
+        if randomstate is not None:
+            np.random.seed(randomstate)
         self.coef_ = np.random.randn(features, 1)
 
         # Save arrays
@@ -121,10 +120,10 @@ class LogReg:
         self.yTest = yTest
 
         # Normalization parameters
-        self.mean = XTrain.mean(axis=0)
-        self.std = XTrain.std(axis=0)
-        self.min = XTrain.min(axis=0)
-        self.max = XTrain.max(axis=0)
+        self.mean_ = XTrain.mean(axis=0)
+        self.std_ = XTrain.std(axis=0)
+        self.min_ = XTrain.min(axis=0)
+        self.max_ = XTrain.max(axis=0)
         self.norm_ = False
 
     def normalize(self, method="z-score", force=False):
@@ -148,46 +147,46 @@ class LogReg:
 
         if method == "z-score":  # Avoid division by zero
             self.XTrain = np.divide(
-                (self.XTrain - self.mean),
-                self.std,
+                (self.XTrain - self.mean_),
+                self.std_,
                 out=np.zeros_like(self.XTrain),
-                where=self.std != 0,
+                where=self.std_ != 0,
             )
             self.XVal = np.divide(
-                (self.XVal - self.mean),
-                self.std,
+                (self.XVal - self.mean_),
+                self.std_,
                 out=np.zeros_like(self.XVal),
-                where=self.std != 0,
+                where=self.std_ != 0,
             )
             self.XTest = np.divide(
-                (self.XTest - self.mean),
-                self.std,
+                (self.XTest - self.mean_),
+                self.std_,
                 out=np.zeros_like(self.XTest),
-                where=self.std != 0,
+                where=self.std_ != 0,
             )
 
         else:  # Avoid division by zero in "min-max"
             self.XTrain = np.divide(
-                (self.XTrain - self.min),
-                (self.max - self.min),
+                (self.XTrain - self.min_),
+                (self.max_ - self.min_),
                 out=np.zeros_like(self.XTrain),
-                where=(self.max - self.min) != 0,
+                where=(self.max_ - self.min_) != 0,
             )
             self.XVal = np.divide(
-                (self.XVal - self.min),
-                (self.max - self.min),
+                (self.XVal - self.min_),
+                (self.max_ - self.min_),
                 out=np.zeros_like(self.XVal),
-                where=(self.max - self.min) != 0,
+                where=(self.max_ - self.min_) != 0,
             )
             self.XTest = np.divide(
-                (self.XTest - self.min),
-                (self.max - self.min),
+                (self.XTest - self.min_),
+                (self.max_ - self.min_),
                 out=np.zeros_like(self.XTest),
-                where=(self.max - self.min) != 0,
+                where=(self.max_ - self.min_) != 0,
             )
 
         self.norm_ = True
-        self.method.append(method)
+        self.method_.append(method)
 
     def loss(self, features, target, predictions):
         """
@@ -222,7 +221,7 @@ class LogReg:
 
         return self._sigmoid(features.dot(self.coef_) + self.intercept_)
 
-    def fitModel(self):
+    def fit(self):
         """
         Train process of the model, running gradient descent until convergence
         or maximum iterations.
@@ -306,7 +305,7 @@ class LogReg:
 
         return (self.predict(features) >= self.threshold).astype(int)
 
-    def accuracy(self, Xfeatures, Ytarget):
+    def scores(self, XFeatures, yTarget):
         """
         Calculates the performance of the model with given data.
 
@@ -319,42 +318,23 @@ class LogReg:
         if self.coef_ is None:
             raise ValueError("Model not trained yet")
 
-        confusion = {"TP": 0, "TN": 0, "FP": 0, "FN": 0}
-        metrics = {"Accuracy": 0, "Precision": 0, "Recall": 0,
-                   "FPR": 0, "F1": 0}
+        # Calculate confusion values
+        y_pred = self.predictClass(XFeatures)
+        TP = np.sum((y_pred == 1) & (yTarget == 1))
+        TN = np.sum((y_pred == 0) & (yTarget == 0))
+        FP = np.sum((y_pred == 1) & (yTarget == 0))
+        FN = np.sum((y_pred == 0) & (yTarget == 1))
+        confusion = {"TP": TP, "TN": TN, "FP": FP, "FN": FN}
 
-        for row, value in zip(Xfeatures, Ytarget):
-            pred = self.predictClass(row)
-            if pred == value == 1:
-                confusion["TP"] += 1
-            elif pred == value == 0:
-                confusion["TN"] += 1
-            elif pred == 1:
-                confusion["FP"] += 1
-            else:
-                confusion["FN"] += 1
-
-        TP, TN = confusion["TP"], confusion["TN"]
-        FP, FN = confusion["FP"], confusion["FN"]
-        metrics["Accuracy"] = (TP + TN) / (TP + TN + FP + FN)
-        metrics["Precision"] = np.divide(
-            TP, (TP + FP), out=np.zeros_like(TP, dtype=float),
-            where=(TP + FP) != 0
-        )
-        metrics["Recall"] = np.divide(
-            TP, (TP + FN), out=np.zeros_like(TP, dtype=float),
-            where=(TP + FN) != 0
-        )
-        metrics["FPR"] = np.divide(
-            FP, (FP + TN), out=np.zeros_like(TP, dtype=float),
-            where=(FP + TN) != 0
-        )
-        metrics["F1"] = np.divide(
-            2 * TP,
-            (2 * TP + FP + FN),
-            out=np.zeros_like(TP, dtype=float),
-            where=(2 * TP + FP + FN) != 0,
-        )
+        # Calculate metrics, protecting against division  by zero
+        metrics = {
+            "Accuracy": (TP + TN) / (TP + TN + FP + FN),
+            "Precision": TP / (TP + FP) if (TP + FP) > 0 else 0,
+            "Recall": TP / (TP + FN) if (TP + FN) > 0 else 0,
+            "FPR": FP / (FP + TN) if (FP + TN) > 0 else 0,
+            "F1": 2 * TP / (2 * TP + FP + FN) if (
+                (2 * TP + FP + FN) > 0) else 0,
+        }
 
         return confusion, metrics
 
@@ -372,15 +352,15 @@ class LogReg:
         if self.coef_ is None:
             raise ValueError("Model not trained yet")
 
-        self.trainConfusion_, self.trainMetrics_ = self.accuracy(
+        self.trainConfusion_, self.trainMetrics_ = self.scores(
             self.XTrain, self.yTrain
         )
 
-        self.valConfusion_, self.valMetrics_ = self.accuracy(
+        self.valConfusion_, self.valMetrics_ = self.scores(
             self.XVal, self.yVal
         )
 
-        self.testConfusion_, self.testMetrics_ = self.accuracy(
+        self.testConfusion_, self.testMetrics_ = self.scores(
             self.XTest, self.yTest
         )
 
@@ -433,7 +413,7 @@ class LogReg:
 
         return significance
 
-    def convergencePlot(self, filename="Convergence.png"):
+    def convergencePlot(self, filename="Convergence.jpg"):
         """
         Graphs the model´s convergence.
 
@@ -443,8 +423,8 @@ class LogReg:
         # Error validation
         if self.losses_ is None or self.valLosses_ is None:
             raise ValueError("Model not trained yet")
-        if ".png" not in filename:
-            filename += ".png"
+        if ".jpg" not in filename:
+            filename += ".jpg"
 
         plt.figure()
 
@@ -475,12 +455,12 @@ class LogReg:
         plt.grid(True)
 
         # Save figure
-        plt.savefig(filename)
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
 
         # Show figure
         plt.show()
 
-    def confusionPlot(self, confusion, filename="Confusion_Matrix.png"):
+    def confusionPlot(self, confusion, filename="Confusion_Matrix.jpg"):
         """
         Creates an annotated heatmap of the confusion matrix.
 
@@ -491,8 +471,8 @@ class LogReg:
         # Error validations
         if confusion is None:
             raise ValueError("Confusion matrix not calculated yet")
-        if ".png" not in filename:
-            filename += ".png"
+        if ".jpg" not in filename:
+            filename += ".jpg"
 
         # Heatmap order
         # | FP | TN |
@@ -520,12 +500,12 @@ class LogReg:
         ax.set_title("Confusion Matrix")
 
         # Save figure
-        plt.savefig(filename)
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
 
         # Show figure
         plt.show()
 
-    def metricPlot(self, metrics, filename="Metrics.png"):
+    def metricPlot(self, metrics, filename="Metrics.jpg"):
         """
         Plots the precision, recall and F1 score.
 
@@ -536,31 +516,32 @@ class LogReg:
         # Error validations
         if metrics is None:
             raise ValueError("Metrics not calculated yet")
-        if ".png" not in filename:
-            filename += ".png"
+        if ".jpg" not in filename:
+            filename += ".jpg"
 
         # Plot metrics
-        plt.bar(
-            ["Accuracy", "Precision", "Recall", "F1"],
-            [
-                metrics["Accuracy"],
-                metrics["Precision"],
-                metrics["Recall"],
-                metrics["F1"],
-            ]
-        )
-        plt.bar_label(plt.gca().containers[0], fmt="%.2f")
-        plt.title("Model performance metrics")
-        plt.ylabel("Score")
-        plt.ylim(0, 1)
+        fig, ax = plt.subplots()
+        bars = ax.bar(metrics.keys(), metrics.values(), color="gold")
+        # Annotate bars
+        for bar in bars:
+            height = bar.get_height()
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,  # centro de la barra
+                height,                             # posición Y (arriba de la barra)
+                f"{height:.2f}",                    # texto
+                ha="center", va="bottom"            # alineaciones
+            )
 
+        ax.set_title("Model performance metrics")
+        ax.set_ylabel("Score")
+        ax.set_ylim(0, 1.1)
         # Save figure
-        plt.savefig("Metrics.png")
+        fig.savefig(filename, dpi=300, bbox_inches='tight')
 
         # Show figure
-        plt.show()
+        fig.show()
 
-    def rocCurvePlot(self, filename="ROC_Curve.png"):
+    def rocCurvePlot(self, filename="ROC_Curve.jpg"):
         """
         Graphs the ROC curves and calculates its respective
         AUC within the Test set.
@@ -571,8 +552,8 @@ class LogReg:
         # Error validations
         if self.coef_ is None:
             raise ValueError("Model not trained yet")
-        if ".png" not in filename:
-            filename += ".png"
+        if ".jpg" not in filename:
+            filename += ".jpg"
 
         temp = self.threshold
         thresholds = np.linspace(0, 1, 50)
@@ -582,7 +563,7 @@ class LogReg:
         # Iterate the accuracy and metric tests with all different thresholds
         for threshold in thresholds:
             self.threshold = threshold
-            _, metrics = self.accuracy(self.XTest, self.yTest)
+            _, metrics = self.scores(self.XTest, self.yTest)
             tprs.append(metrics["Recall"])
             fprs.append(metrics["FPR"])
 
@@ -602,7 +583,7 @@ class LogReg:
         plt.legend()
 
         # Save figure
-        plt.savefig(filename)
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
 
         # Show figure
         plt.show()
@@ -619,36 +600,33 @@ class LogReg:
         # Error validation
         if ".csv" not in filename:
             filename += ".csv"
-        file = open(filename, "w")
-        if file is None:
-            raise ValueError("file not found")
+        with open(filename, "w") as file:
 
-        # Save hyperparameters
-        file.write(
-            f"{self.lr},{self.tolerance},{self.maxItr},{self.threshold}\n"
-            )
+            # Save hyperparameters
+            file.write(
+                f"{self.lr},{self.tolerance},{self.maxItr},{self.threshold}\n"
+                )
 
-        # Save coefficients and intercept
-        file.write(",".join(map(str, self.coef_.flatten().tolist())) + ","
-                   + str(self.intercept_) + "\n")
+            # Save coefficients and intercept
+            file.write(",".join(map(str, self.coef_.flatten().tolist())) + ","
+                       + str(self.intercept_) + "\n")
 
-        # Save losses
-        file.write(",".join(map(str, self.losses_)) + "\n")
-        file.write(",".join(map(str, self.valLosses_)) + "\n")
+            # Save losses
+            file.write(",".join(map(str, self.losses_)) + "\n")
+            file.write(",".join(map(str, self.valLosses_)) + "\n")
 
-        # Save other parameters
-        file.write(f"{self.iterations_},{self.norm_},")
-        file.write("".join([m + "," for m in self.method]) + "\n")
+            # Save other parameters
+            file.write(f"{self.iterations_},{self.norm_},")
+            file.write("".join([m + "," for m in self.method_]) + "\n")
 
-        # Save normalization params if applicable
-        if self.norm_:
-            file.write(",".join(map(str, self.std.tolist())) + "\n")
-            file.write(",".join(map(str, self.mean.tolist())) + "\n")
-            file.write(",".join(map(str, self.min.tolist())) + "\n")
-            file.write(",".join(map(str, self.max.tolist())) + "\n")
+            # Save normalization params if applicable
+            if self.norm_:
+                file.write(",".join(map(str, self.std_.tolist())) + "\n")
+                file.write(",".join(map(str, self.mean_.tolist())) + "\n")
+                file.write(",".join(map(str, self.min_.tolist())) + "\n")
+                file.write(",".join(map(str, self.max_.tolist())) + "\n")
 
-        print(f"Model saved as {filename}")
-        file.close()
+            print(f"Model saved as {filename}")
 
     def loadModel(self, filename):
         """
@@ -662,51 +640,48 @@ class LogReg:
         # Error validation
         if ".csv" not in filename:
             filename += ".csv"
-        file = open(filename, "r")
-        if file is None:
-            raise ValueError("File not found")
+        with open(filename, "r") as file:
 
-        # Load hyperparameters
-        params = file.readline().split(",")
-        self.lr = float(params[0])
-        self.tolerance = float(params[1])
-        self.maxItr = int(params[2])
-        self.threshold = float(params[3])
+            # Load hyperparameters
+            params = file.readline().split(",")
+            self.lr = float(params[0])
+            self.tolerance = float(params[1])
+            self.maxItr = int(params[2])
+            self.threshold = float(params[3])
 
-        # Load coefficients and intercept
-        coefs = file.readline().split(",")
-        self.coef_ = np.array(coefs[:-1]).astype(float).reshape(-1, 1)
-        self.intercept_ = float(coefs[-1])
+            # Load coefficients and intercept
+            coefs = file.readline().split(",")
+            self.coef_ = np.array(coefs[:-1]).astype(float).reshape(-1, 1)
+            self.intercept_ = float(coefs[-1])
 
-        # Load losses
-        self.losses_ = np.array(
-            file.readline().split(",")
-            ).astype(float).tolist()
-        self.valLosses_ = np.array(
-            file.readline().split(",")
-            ).astype(float).tolist()
-
-        # Load other parameters
-        params = file.readline().split(",")
-        self.iterations_ = int(params[0])
-        self.norm_ = params[1] == "True"
-
-        if self.norm_:  # Load normalization params
-            self.std = np.array(
+            # Load losses
+            self.losses_ = np.array(
                 file.readline().split(",")
-            ).astype(float)
-            self.mean = np.array(
+                ).astype(float).tolist()
+            self.valLosses_ = np.array(
                 file.readline().split(",")
-            ).astype(float)
-            self.min = np.array(
-                file.readline().split(",")
-            ).astype(float)
-            self.max = np.array(
-                file.readline().split(",")
-            ).astype(float)
+                ).astype(float).tolist()
 
-            for method in params[2:-1]:  # Normalize keeping order
-                self.normalize(method, force=True)
+            # Load other parameters
+            params = file.readline().split(",")
+            self.iterations_ = int(params[0])
+            self.norm_ = params[1] == "True"
 
-        print(f"Model loaded from {filename}")
-        file.close()
+            if self.norm_:  # Load normalization params
+                self.std_ = np.array(
+                    file.readline().split(",")
+                ).astype(float)
+                self.mean_ = np.array(
+                    file.readline().split(",")
+                ).astype(float)
+                self.min_ = np.array(
+                    file.readline().split(",")
+                ).astype(float)
+                self.max_ = np.array(
+                    file.readline().split(",")
+                ).astype(float)
+
+                for method in params[2:-1]:  # Normalize keeping order
+                    self.normalize(method, force=True)
+
+            print(f"Model loaded from {filename}")
