@@ -8,6 +8,7 @@ Characteristics:
 - Check for class imbalance.
 - No feature engineering.
 - Light hyperparameter tuning.
+- Check for coefficient significance.
 Author: Luis Adrián Uribe Cruz
 """
 # Import necessary libraries
@@ -28,7 +29,7 @@ def main():
     lolset = lolset.drop(columns=[
         "blueAssists", "blueTotalGold", "blueTotalExperience",
         "blueExperienceDiff", "redAssists", "redTotalGold",
-        "redTotalExperience", "redExperienceDiff"
+        "redTotalExperience"
         ])
 
     # Print class balance
@@ -37,7 +38,7 @@ def main():
     time.sleep(4)
 
     # Initialize model
-    lolmodel = LogReg(lr=0.05, maxItr=10000, threshold=0.5)
+    lolmodel = LogReg(lr=0.05, maxItr=10000)
     lolmodel.dataLoader(lolset, "blueWins")
     lolmodel.normalize()  # Z-score normalization
 
@@ -49,9 +50,11 @@ def main():
     # Plot evaluation metrics
     lolmodel.convergencePlot("Outputs/decorrelated_Convergence.jpg")
     lolmodel.rocCurvePlot("Outputs/decorrelated_ROC.jpg")
-    lolmodel.metricPlot(lolmodel.valMetrics_,
-                        "Outputs/decorrelated_Metrics.jpg")
-    lolmodel.confusionPlot(lolmodel.valConfusion_,
+    lolmodel.metricPlot(lolmodel.trainMetrics_,
+                        "Outputs/decorrelated__train_Metrics.jpg")
+    lolmodel.metricPlot(lolmodel.testMetrics_,
+                        "Outputs/decorrelated__test_Metrics.jpg")
+    lolmodel.confusionPlot(lolmodel.testConfusion_,
                            "Outputs/decorrelated_Confusion.jpg")
     time.sleep(3)
 

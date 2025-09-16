@@ -31,8 +31,9 @@ def main():
     lolset = lolset.drop(columns=[
         "blueEliteMonsters", "blueAvgLevel", "blueCSPerMin", "blueGoldPerMin",
         "redFirstBlood", "redKills", "redDeaths", "redEliteMonsters",
-        "redAvgLevel", "redCSPerMin", "redGoldPerMin"])
-
+        "redAvgLevel", "redCSPerMin", "redGoldPerMin", "redGoldDiff",
+        "redExperienceDiff"
+        ])
     # Initialize and train model with default hyperparameters
     lolmodel = LogReg()
     lolmodel.dataLoader(lolset, "blueWins")
@@ -46,8 +47,11 @@ def main():
     # Plot evaluation metrics
     lolmodel.convergencePlot("Outputs/redundant_Convergence.jpg")
     lolmodel.rocCurvePlot("Outputs/redundant_ROC.jpg")
-    lolmodel.metricPlot(lolmodel.valMetrics_, "Outputs/redundant_Metrics.jpg")
-    lolmodel.confusionPlot(lolmodel.valConfusion_,
+    lolmodel.metricPlot(lolmodel.trainMetrics_,
+                        "Outputs/redundant_train_Metrics.jpg")
+    lolmodel.metricPlot(lolmodel.testMetrics_,
+                        "Outputs/redundant_test_Metrics.jpg")
+    lolmodel.confusionPlot(lolmodel.testConfusion_,
                            "Outputs/redundant_Confusion.jpg")
     time.sleep(3)
 
